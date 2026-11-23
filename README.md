@@ -171,7 +171,7 @@ tools/genicon        图标生成
 
 ## 许可
 
-[MIT License](LICENSE) © 2026 T3nc
+[MIT License](LICENSE) © 2026 T3nc@YoGo Studio
 
 ## 说明
 
