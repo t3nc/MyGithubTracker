@@ -7,6 +7,9 @@
 git token.txt
 *.log
 
+# 个人站点用的文档（本地保留，不入库）
+/docs/
+
 # IDE / 编辑器
 .codebuddy/
 .vscode/

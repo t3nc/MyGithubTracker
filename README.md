@@ -6,7 +6,7 @@
 
 单文件 exe，双击即用；纯 Go 实现，不依赖 Go / Node / 运行库，界面由系统自带的 Edge 渲染。
 
-![主列表](docs/images/list-light.png)
+![主列表](assets/screenshots/list-light.png)
 
 ## 功能
 
@@ -27,13 +27,11 @@
 
 | 深色主题 | 版本详情 |
 | --- | --- |
-| ![深色](docs/images/list-dark.png) | ![版本详情](docs/images/detail-releases.png) |
+| ![深色](assets/screenshots/list-dark.png) | ![版本详情](assets/screenshots/detail-releases.png) |
 
 README 预览（右侧按钮固定在页签行，长文档滚动时不跟着走）：
 
-![README](docs/images/detail-readme.png)
-
-更多介绍见 [docs/INTRO.md](docs/INTRO.md)。
+![README](assets/screenshots/detail-readme.png)
 
 ## 快速开始
 
