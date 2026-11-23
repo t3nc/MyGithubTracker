@@ -98,4 +98,5 @@ GitHub 的通知不区分 Release，也不方便批量下载。这个工具把�
 
 - 作者：**T3nc**
 - 发布主页：<https://yogo.wang>
+- 许可：[MIT License](../LICENSE)
 - 图标使用 GitHub 的 Octocat 标识，**本工具为个人非官方项目**，与 GitHub 无隶属关系；该标识版权归 GitHub 所有，仅用于个人工具识别。

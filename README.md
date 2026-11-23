@@ -169,6 +169,10 @@ web/                 内嵌的前端页面
 tools/genicon        图标生成
 ```
 
+## 许可
+
+[MIT License](LICENSE) © 2026 T3nc
+
 ## 说明
 
 - 本工具是个人非官方项目，与 GitHub 无隶属关系。
