@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>GitHub Tracker</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="shortcut icon" href="/favicon.ico">
+<script>
+  // 在样式表生效前确定主题，避免首屏闪一下。
+  (function () {
+    var mode = 'light';
+    try {
+      var q = new URLSearchParams(location.search).get('theme');
+      var stored = localStorage.getItem('mgt-theme');
+      if (q === 'light' || q === 'dark') mode = q;
+      else if (stored === 'light' || stored === 'dark' || stored === 'auto') mode = stored;
+      var resolved = mode;
+      if (mode !== 'light' && mode !== 'dark') {
+        resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.setAttribute('data-theme', resolved);
+      document.documentElement.setAttribute('data-theme-mode', mode);
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.setAttribute('data-theme-mode', 'light');
+    }
+  })();
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- Octocat 图形定义（页面内多处复用） -->
+<svg width="0" height="0" style="position:absolute;pointer-events:none" aria-hidden="true" focusable="false">
+  <symbol id="ico-octocat" viewBox="0 0 16 16">
+    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+  </symbol>
+</svg>
+<div class="app">
+  <div class="progress-top" id="progressTop"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="currentColor"><use href="#ico-octocat"/></svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-title">GitHub Tracker</div>
+        <div class="brand-sub" id="brandSub">正在初始化…</div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <button class="btn btn-ghost user-chip" id="userChip" type="button" title="GitHub 账号">
+        <svg class="user-chip-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><use href="#ico-octocat"/></svg>
+        <span class="user-chip-text" id="userChipText">未连接</span>
+      </button>
+      <div class="quota" id="quota" title="GitHub API 剩余配额">
+        <span class="quota-dot" id="quotaDot"></span>
+        <span id="quotaText">—</span>
+      </div>
+      <button class="btn btn-ghost" id="btnDownloads" title="下载任务">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>
+        <span>下载</span>
+        <span class="badge" id="dlBadge" hidden>0</span>
+      </button>
+      <button class="btn btn-primary" id="btnRefresh">
+        <svg class="ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M21 4v5h-5"/></svg>
+        <span id="btnRefreshText">刷新</span>
+      </button>
+      <button class="btn btn-icon" id="btnTheme" title="切换明暗主题 (Ctrl+Shift+L)" aria-label="切换明暗主题">
+        <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>
+        <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.8v2.2M12 19v2.2M4.2 12H2M22 12h-2.2M6.3 6.3 4.8 4.8M19.2 19.2l-1.5-1.5M17.7 6.3l1.5-1.5M4.8 19.2l1.5-1.5"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btnSettings" title="设置 (Ctrl+,)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.11a1.7 1.7 0 0 0-1.06-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.11A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.11a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.11a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.11a1.7 1.7 0 0 0-1.49.86z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search" type="text" placeholder="搜索仓库名或描述" autocomplete="off" spellcheck="false">
+      <kbd>/</kbd>
+    </div>
+
+    <div class="segmented" id="filterBar" role="tablist">
+      <button data-filter="all" class="active">全部 <span class="cnt" id="cntAll">0</span></button>
+      <button data-filter="update">有更新 <span class="cnt" id="cntUpdate">0</span></button>
+      <button data-filter="readme">仅 README <span class="cnt" id="cntReadme">0</span></button>
+      <button data-filter="error">失败 <span class="cnt" id="cntError">0</span></button>
+    </div>
+
+    <div class="toolbar-right">
+      <label class="check" id="onlyUnreadWrap">
+        <input type="checkbox" id="onlyUnread">
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg></span>
+        仅看未读
+      </label>
+      <div class="select-wrap" title="按最近更新时间筛选">
+        <select id="rangeSel">
+          <option value="0">全部时间</option>
+          <option value="1">24 小时内</option>
+          <option value="7">7 天内</option>
+          <option value="30">30 天内</option>
+          <option value="90">90 天内</option>
+        </select>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="select-wrap">
+        <select id="sortSel">
+          <option value="updated">最新发布</option>
+          <option value="stars">Star 数</option>
+          <option value="name">名称</option>
+        </select>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <main class="list" id="list">
+    <div class="skeleton-wrap" id="skeleton"></div>
+  </main>
+
+  <footer class="statusbar">
+    <div class="status-left">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">准备就绪</span>
+    </div>
+    <div class="status-right">
+      <span id="lastRefreshText">尚未刷新</span>
+      <span class="sep">·</span>
+      <span id="tokenHint">未配置 Token</span>
+    </div>
+  </footer>
+</div>
+
+<!-- 下载抽屉 -->
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div>
+      <h2>下载任务</h2>
+      <p id="drawerDir">—</p>
+    </div>
+    <div class="drawer-head-actions">
+      <button class="btn btn-ghost btn-sm" id="btnOpenDir">打开目录</button>
+      <button class="btn btn-icon btn-sm" id="btnDrawerClose" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="drawer-body" id="downloadList"></div>
+</aside>
+
+<!-- 设置面板 -->
+<aside class="panel" id="settings" aria-hidden="true">
+  <div class="panel-head">
+    <h2>设置</h2>
+    <button class="btn btn-icon btn-sm" id="btnSettingsClose" title="关闭">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+
+  <div class="panel-body">
+    <section class="field-group">
+      <h3>账号</h3>
+      <label class="field">
+        <span class="field-label">Personal Access Token</span>
+        <div class="input-row">
+          <input id="cfgToken" type="password" placeholder="ghp_… 或 github_pat_…" autocomplete="off" spellcheck="false">
+          <button class="btn btn-ghost btn-sm" id="btnToggleToken" type="button">显示</button>
+        </div>
+        <span class="field-hint">仅需 <code>repo</code> 与 <code>read:user</code> 权限（公开星标只需 <code>public_repo</code>）。Token 只保存在本机。</span>
+      </label>
+      <div class="inline-row">
+        <button class="btn btn-ghost btn-sm" id="btnOpenTokenPage" type="button">去生成 Token</button>
+        <button class="btn btn-ghost btn-sm" id="btnTest" type="button">测试连接</button>
+        <span class="test-result" id="testResult"></span>
+      </div>
+    </section>
+
+    <section class="field-group">
+      <h3>网络代理</h3>
+      <div class="segmented seg-full" id="proxyModeBar">
+        <button data-mode="system">跟随系统</button>
+        <button data-mode="none">不使用</button>
+        <button data-mode="custom">自定义</button>
+      </div>
+      <label class="field" id="proxyUrlField">
+        <span class="field-label">代理地址</span>
+        <input id="cfgProxyUrl" type="text" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" autocomplete="off" spellcheck="false">
+        <span class="field-hint">API 请求与文件下载共用该代理。修改后点「测试连接」验证。</span>
+      </label>
+    </section>
+
+    <section class="field-group">
+      <h3>下载</h3>
+      <label class="field">
+        <span class="field-label">保存目录</span>
+        <div class="input-row">
+          <input id="cfgDownloadDir" type="text" autocomplete="off" spellcheck="false">
+          <button class="btn btn-ghost btn-sm" id="btnBrowseDir" type="button">浏览</button>
+          <button class="btn btn-ghost btn-sm" id="btnOpenDownloadDir" type="button">打开</button>
+        </div>
+      </label>
+      <label class="field">
+        <span class="field-label">并发检查数 <b id="concValue">8</b></span>
+        <input id="cfgConcurrency" type="range" min="1" max="16" step="1" value="8">
+        <span class="field-hint">并发越高刷新越快，但更容易触发 GitHub 限流（5000 次/小时）。</span>
+      </label>
+      <label class="field">
+        <span class="field-label">每个仓库缓存的最近版本数 <b id="recentValue">3</b></span>
+        <input id="cfgRecentCount" type="range" min="1" max="5" step="1" value="3">
+        <span class="field-hint">详情弹窗中展示最近 N 个版本的更新说明与附件。</span>
+      </label>
+    </section>
+
+    <section class="field-group">
+      <h3>内容翻译</h3>
+      <span class="field-label" style="margin-bottom:6px">翻译引擎</span>
+      <div class="segmented seg-full" id="engineBar">
+        <button data-engine="ai" type="button">AI 接口</button>
+        <button data-engine="browser" type="button">浏览器内置</button>
+      </div>
+      <div class="inline-row" style="margin-top:10px">
+        <button class="btn btn-ghost btn-sm" id="btnCheckEngine" type="button">检测</button>
+        <span class="test-result" id="engineStatus">—</span>
+      </div>
+      <span class="field-hint" id="engineHint">浏览器内置翻译使用 Edge / Chrome 自带的本地模型，不消耗 API 配额；首次使用可能需要下载中英语言包。</span>
+      <div class="field-hint" id="aiScopeHint" hidden style="margin-top:10px;color:var(--warn)">当前使用「浏览器内置」引擎，下面的接口配置仅在切回 AI 接口时生效。</div>
+      <label class="field">
+        <span class="field-label">API 地址（Base URL）</span>
+        <input id="cfgAIBaseUrl" type="text" placeholder="https://token.sensenova.cn/v1" autocomplete="off" spellcheck="false">
+        <span class="field-hint">任意 OpenAI 兼容服务。填根地址即可，会自动补 <code>/chat/completions</code>；直接贴完整地址也能识别。</span>
+      </label>
+      <label class="field">
+        <span class="field-label">API Key</span>
+        <div class="input-row">
+          <input id="cfgAIKey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+          <button class="btn btn-ghost btn-sm" id="btnToggleAIKey" type="button">显示</button>
+        </div>
+        <span class="field-hint" id="aiKeyHint">用于把版本说明与 README 翻译成中文，Key 只保存在本机。</span>
+      </label>
+      <label class="field">
+        <span class="field-label">模型</span>
+        <div class="input-row">
+          <input id="cfgAIModel" type="text" list="aiModelList" placeholder="sensenova-6.8-flash-lite" autocomplete="off" spellcheck="false">
+          <button class="btn btn-ghost btn-sm" id="btnFetchModels" type="button">获取模型</button>
+        </div>
+        <datalist id="aiModelList"></datalist>
+        <span class="field-hint">可直接填写模型名，也可点「获取模型」从服务商读取。<span id="aiModelsHint"></span></span>
+      </label>
+      <div class="inline-row">
+        <button class="btn btn-ghost btn-sm" id="btnTestAI" type="button">测试翻译</button>
+        <span class="test-result" id="aiTestResult"></span>
+      </div>
+    </section>
+
+    <section class="field-group">
+      <h3>列表</h3>
+      <label class="check">
+        <input type="checkbox" id="cfgHideOwned">
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg></span>
+        隐藏我自己创建的仓库
+      </label>
+      <span class="field-hint">按仓库 owner 与你的 GitHub 登录名比对；登录名未知时不做过滤（可在「测试连接」后刷新）。</span>
+    </section>
+
+    <section class="field-group">
+      <h3>外观</h3>
+      <div class="segmented seg-full" id="themeBar">
+        <button data-theme-mode="light">浅色</button>
+        <button data-theme-mode="dark">深色</button>
+        <button data-theme-mode="auto">跟随系统</button>
+      </div>
+      <span class="field-hint">默认浅色；选择保存在本机，重启后保持。也可用 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> 快速切换。</span>
+    </section>
+
+    <section class="field-group">
+      <h3>关于</h3>
+      <div class="about-row"><span>版本</span><b id="aboutVersion">—</b></div>
+      <div class="about-row"><span>作者</span><b>T3nc</b></div>
+      <div class="about-row"><span>发布主页</span><b><a class="about-link" id="aboutHomepage" href="https://yogo.wang">yogo.wang</a></b></div>
+      <div class="about-row"><span>数据目录</span><b class="mono ellipsis" id="aboutDir">—</b></div>
+      <div class="inline-row">
+        <button class="btn btn-ghost btn-sm" id="btnOpenLog" type="button">查看日志</button>
+        <button class="btn btn-ghost btn-sm" id="btnQuit" type="button">退出程序</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="panel-foot">
+    <button class="btn btn-ghost" id="btnResetConfig" type="button">恢复默认</button>
+    <button class="btn btn-primary" id="btnSaveConfig" type="button">保存设置</button>
+  </div>
+</aside>
+
+<div class="scrim" id="scrim"></div>
+
+<!-- 资产选择 -->
+<div class="modal" id="modal" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div>
+        <h2>选择要下载的文件</h2>
+        <p id="modalSub">未能自动识别 Windows 安装包，请手动选择</p>
+      </div>
+      <button class="btn btn-icon btn-sm" id="btnModalClose">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="modalAssets"></div>
+  </div>
+</div>
+
+<!-- 仓库详情 -->
+<div class="modal" id="detail" aria-hidden="true">
+  <div class="modal-card modal-wide">
+    <div class="modal-head">
+      <div class="detail-head-main">
+        <div class="detail-title">
+          <span class="repo-name" id="detailRepo">—</span>
+          <span class="chip arch" id="detailMode">—</span>
+        </div>
+        <p id="detailSub">—</p>
+      </div>
+      <div class="detail-head-actions">
+        <button class="btn btn-ghost btn-sm" id="btnDetailRepo" type="button">打开仓库</button>
+        <button class="btn btn-icon btn-sm" id="btnDetailClose" title="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="detail-tabs" id="detailTabs" role="tablist">
+      <button data-tab="releases" class="active" role="tab">版本</button>
+      <button data-tab="readme" role="tab">README</button>
+      <div class="detail-actions" id="detailActions"></div>
+    </div>
+    <div class="modal-body" id="detailBody"></div>
+  </div>
+</div>
+
+<!-- 首次引导 -->
+<div class="onboarding" id="onboarding" hidden>
+  <div class="onboard-card">
+    <div class="brand-mark lg" aria-hidden="true">
+      <svg viewBox="0 0 16 16" fill="currentColor"><use href="#ico-octocat"/></svg>
+    </div>
+    <h1>先连接你的 GitHub 账号</h1>
+    <p class="onboard-lead">本工具读取你的星标仓库列表与最新 Release，全部数据只保存在本机。</p>
+    <label class="field">
+      <span class="field-label">Personal Access Token</span>
+      <input id="obToken" type="password" placeholder="ghp_…" autocomplete="off" spellcheck="false">
+      <span class="field-hint">需要 <code>read:user</code> 权限即可读取公开星标。</span>
+    </label>
+    <label class="field">
+      <span class="field-label">代理（可选）</span>
+      <input id="obProxy" type="text" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="onboard-actions">
+      <button class="btn btn-ghost" id="btnObTokenPage" type="button">生成 Token</button>
+      <button class="btn btn-primary" id="btnObStart" type="button">保存并开始</button>
+    </div>
+    <p class="onboard-foot" id="obError"></p>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
