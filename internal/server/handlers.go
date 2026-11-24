@@ -78,23 +78,62 @@ type stateCounts struct {
 	Archived  int `json:"archived"`
 }
 
+// platformDownload 是按平台选优后的下载项，platform 为前后端约定的平台 ID。
+type platformDownload struct {
+	Platform string `json:"platform"`
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+	SizeText string `json:"sizeText"`
+	URL      string `json:"url"`
+}
+
+// repoView 在仓库状态上追加平台下载项；内嵌结构保证原有 JSON 字段不变。
+type repoView struct {
+	store.RepoState
+	Downloads []platformDownload `json:"downloads"`
+}
+
+// newRepoView 只为有附件的 Release 仓库计算平台下载项，README / 无可追踪仓库保持空数组。
+func newRepoView(rs store.RepoState) repoView {
+	v := repoView{RepoState: rs, Downloads: []platformDownload{}}
+	if rs.Mode() != store.TrackRelease || len(rs.Assets) == 0 {
+		return v
+	}
+	candidates := make([]github.Asset, 0, len(rs.Assets))
+	for _, a := range rs.Assets {
+		candidates = append(candidates, github.Asset{Name: a.Name, Size: a.Size, DownloadURL: a.URL, ContentType: a.ContentType})
+	}
+	for _, pa := range github.BestPerPlatform(candidates) {
+		v.Downloads = append(v.Downloads, platformDownload{
+			Platform: pa.Platform,
+			Name:     pa.Name,
+			Size:     pa.Size,
+			SizeText: humanSize(pa.Size),
+			URL:      pa.URL,
+		})
+	}
+	return v
+}
+
 type stateResponse struct {
-	Repos       []store.RepoState `json:"repos"`
-	Refreshing  bool              `json:"refreshing"`
-	Progress    manager.Progress  `json:"progress"`
-	LastRefresh string            `json:"lastRefresh"`
-	Rate        github.RateInfo   `json:"rate"`
-	User        string            `json:"user"`
-	HasToken    bool              `json:"hasToken"`
-	Counts      stateCounts       `json:"counts"`
-	Downloads   int               `json:"downloadsActive"`
-	Version     string            `json:"version"`
-	Arch        string            `json:"arch"`
-	LogPath     string            `json:"logPath"`
-	ConfigDir   string            `json:"configDir"`
-	HideOwned   bool              `json:"hideOwned"`
-	OwnedCount  int               `json:"ownedCount"`
-	HiddenCount int               `json:"hiddenCount"`
+	Repos        []repoView       `json:"repos"`
+	Refreshing   bool             `json:"refreshing"`
+	Progress     manager.Progress `json:"progress"`
+	LastRefresh  string           `json:"lastRefresh"`
+	Rate         github.RateInfo  `json:"rate"`
+	User         string           `json:"user"`
+	HasToken     bool             `json:"hasToken"`
+	Counts       stateCounts      `json:"counts"`
+	Downloads    int              `json:"downloadsActive"`
+	Version      string           `json:"version"`
+	Arch         string           `json:"arch"`
+	OS           string           `json:"os"`
+	PlatformHint string           `json:"platformHint"`
+	LogPath      string           `json:"logPath"`
+	ConfigDir    string           `json:"configDir"`
+	HideOwned    bool             `json:"hideOwned"`
+	OwnedCount   int              `json:"ownedCount"`
+	HiddenCount  int              `json:"hiddenCount"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -141,21 +180,28 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	views := make([]repoView, 0, len(repos))
+	for _, rs := range repos {
+		views = append(views, newRepoView(rs))
+	}
+
 	resp := stateResponse{
-		Repos:       repos,
-		Refreshing:  s.opt.Manager.Refreshing(),
-		Progress:    s.opt.Manager.Progress(),
-		Rate:        s.opt.Manager.Rate(),
-		User:        s.opt.Manager.User(),
-		HasToken:    s.Config().Token != "",
-		Counts:      counts,
-		Downloads:   s.opt.Downloader.Active(),
-		Version:     s.opt.Version,
-		Arch:        runtime.GOARCH,
-		ConfigDir:   config.Dir(),
-		HideOwned:   cfg.HideOwned,
-		OwnedCount:  ownedTotal,
-		HiddenCount: hidden,
+		Repos:        views,
+		Refreshing:   s.opt.Manager.Refreshing(),
+		Progress:     s.opt.Manager.Progress(),
+		Rate:         s.opt.Manager.Rate(),
+		User:         s.opt.Manager.User(),
+		HasToken:     s.Config().Token != "",
+		Counts:       counts,
+		Downloads:    s.opt.Downloader.Active(),
+		Version:      s.opt.Version,
+		Arch:         runtime.GOARCH,
+		OS:           runtime.GOOS,
+		PlatformHint: github.DefaultPlatform(runtime.GOOS, runtime.GOARCH),
+		ConfigDir:    config.Dir(),
+		HideOwned:    cfg.HideOwned,
+		OwnedCount:   ownedTotal,
+		HiddenCount:  hidden,
 	}
 	if t := s.opt.Manager.LastRefresh(); !t.IsZero() {
 		resp.LastRefresh = t.UTC().Format(time.RFC3339)
@@ -222,6 +268,7 @@ type assetView struct {
 	Size        int64  `json:"size"`
 	SizeText    string `json:"sizeText"`
 	URL         string `json:"url"`
+	Platform    string `json:"platform"`
 	Recommended bool   `json:"recommended"`
 }
 
@@ -230,10 +277,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Repo  string `json:"repo"`
-		Asset string `json:"asset"`
-		URL   string `json:"url"`
-		Name  string `json:"name"`
+		Repo     string `json:"repo"`
+		Asset    string `json:"asset"`
+		Platform string `json:"platform"`
+		URL      string `json:"url"`
+		Name     string `json:"name"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
@@ -289,17 +337,34 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "附件不存在"})
 			return
 		}
+	} else if body.Platform != "" {
+		if !github.ValidPlatform(body.Platform) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "未知的平台标识"})
+			return
+		}
+		best, found := github.MatchPlatform(candidates, body.Platform)
+		if !found {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":     false,
+				"reason": "no-platform",
+				"error":  "该版本没有所选平台的可下载文件",
+			})
+			return
+		}
+		chosen = best
 	} else {
 		best, found := github.MatchWindowsAsset(candidates, runtime.GOARCH)
 		if !found {
 			ranked := github.RankedAssets(candidates, runtime.GOARCH)
 			views := make([]assetView, 0, len(ranked))
 			for i, a := range ranked {
+				pid, _ := github.ClassifyAsset(a.Name)
 				views = append(views, assetView{
 					Name:        a.Name,
 					Size:        a.Size,
 					SizeText:    humanSize(a.Size),
 					URL:         a.DownloadURL,
+					Platform:    pid,
 					Recommended: i == 0,
 				})
 			}
@@ -443,12 +508,24 @@ func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
 		ranked := github.RankedAssets(rel.Assets, runtime.GOARCH)
 		assets := make([]assetView, 0, len(ranked))
 		for j, a := range ranked {
+			pid, _ := github.ClassifyAsset(a.Name)
 			assets = append(assets, assetView{
 				Name:        a.Name,
 				Size:        a.Size,
 				SizeText:    humanSize(a.Size),
 				URL:         a.DownloadURL,
+				Platform:    pid,
 				Recommended: j == 0,
+			})
+		}
+		downloads := make([]platformDownload, 0)
+		for _, pa := range github.BestPerPlatform(rel.Assets) {
+			downloads = append(downloads, platformDownload{
+				Platform: pa.Platform,
+				Name:     pa.Name,
+				Size:     pa.Size,
+				SizeText: humanSize(pa.Size),
+				URL:      pa.URL,
 			})
 		}
 		autoAsset := ""
@@ -469,6 +546,7 @@ func (s *Server) handleReleases(w http.ResponseWriter, r *http.Request) {
 			"prerelease":  rel.Prerelease,
 			"body":        rel.Body,
 			"assets":      assets,
+			"downloads":   downloads,
 			"autoAsset":   autoAsset,
 			"isLatest":    i == latestIdx,
 		})

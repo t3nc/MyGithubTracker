@@ -256,7 +256,7 @@ func (d *Downloader) attempt(ctx context.Context, id, rawURL string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "MyGithubTracker/1.0")
+	req.Header.Set("User-Agent", "MyGithubTracker/1.2")
 	req.Header.Set("Accept", "application/octet-stream")
 	// 仅对 GitHub API 域名附带 Token，避免凭证被重定向带到第三方 CDN。
 	if token != "" && strings.HasPrefix(rawURL, "https://api.github.com/") {

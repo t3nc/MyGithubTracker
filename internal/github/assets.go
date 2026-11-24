@@ -6,107 +6,49 @@ import (
 	"strings"
 )
 
-// 命中这些片段的资产属于其他平台或校验文件，直接排除。
-var excludeTokens = []string{
-	"darwin", "macos", "osx", "os x", "apple", "linux", "android",
-	"freebsd", "openbsd", "netbsd", "sunos", "illumos",
-	"appimage", ".deb", ".rpm", ".dmg", ".apk", ".pkg", ".flatpak", ".snap", ".ipa",
-	".nupkg", ".jar", ".whl",
-}
-
 // 校验/签名/说明类文件不作为安装包。
 var junkSuffixes = []string{
 	".sha256", ".sha1", ".sha512", ".md5", ".asc", ".sig", ".sign",
 	".txt", ".json", ".xml", ".yml", ".yaml", ".pem", ".sbom", ".intoto",
+	".nupkg", ".jar", ".whl", ".ipa",
+	".blockmap", ".zsync", ".pdb", ".map", ".torrent",
 }
-
-// Windows 平台标识。
-var windowsTokens = []string{
-	"windows", "win64", "win32", "win-x64", "win-x86", "win-x32",
-	"win_x64", "win_x86", "win_amd64", "win-", "-win", "_win", "win.",
-}
-
-const (
-	scoreWindows   = 60
-	scoreArchMatch = 30
-	scoreExe       = 20
-	scoreMsi       = 15
-	scoreArchive   = 10
-	scoreSetupHint = 5
-)
 
 // ScoreAsset 对单个资产名打分；excluded 为 true 表示明确不是本平台可用文件。
+// 平台识别统一委托给 ClassifyAsset，本函数只保留 Windows 视角以兼容旧调用方。
 func ScoreAsset(name, goarch string) (score int, excluded bool) {
-	n := strings.ToLower(strings.TrimSpace(name))
-	if n == "" {
+	platform, ok := ClassifyAsset(name)
+	if !ok {
 		return 0, true
 	}
-	for _, s := range junkSuffixes {
-		if strings.HasSuffix(n, s) {
-			return 0, true
+	switch platform {
+	case PlatformWindowsX64, PlatformWindowsX86, PlatformWindowsARM64:
+		if goarch == "" {
+			goarch = runtime.GOARCH
 		}
-	}
-	for _, t := range excludeTokens {
-		if strings.Contains(n, t) {
-			return 0, true
+		score = platformScore(name, platform)
+		want := "x64"
+		switch goarch {
+		case "arm64":
+			want = "arm64"
+		case "386":
+			want = "x86"
 		}
-	}
-
-	if goarch == "" {
-		goarch = runtime.GOARCH
-	}
-
-	for _, t := range windowsTokens {
-		if strings.Contains(n, t) {
-			score += scoreWindows
-			break
-		}
-	}
-	score += archScore(n, goarch)
-
-	switch {
-	case strings.HasSuffix(n, ".exe"):
-		score += scoreExe
-	case strings.HasSuffix(n, ".msi"):
-		score += scoreMsi
-	case strings.HasSuffix(n, ".zip"):
-		score += scoreArchive
-	case strings.HasSuffix(n, ".7z"):
-		score += scoreArchive - 2
-	case strings.HasSuffix(n, ".tar.gz"):
-		score += scoreArchive - 4
-	}
-	for _, h := range []string{"setup", "installer", "install", "portable", "x64"} {
-		if strings.Contains(n, h) {
-			score += scoreSetupHint
-			break
-		}
-	}
-	return score, false
-}
-
-func archScore(n, goarch string) int {
-	switch goarch {
-	case "arm64":
+		got := strings.TrimPrefix(platform, "windows-")
 		switch {
-		case strings.Contains(n, "arm64"), strings.Contains(n, "aarch64"):
-			return scoreArchMatch
-		case strings.Contains(n, "x86_64"), strings.Contains(n, "amd64"), strings.Contains(n, "x64"):
-			return -15
+		case got == want:
+			// 架构完全匹配，不扣分
+		case got == "x86" && want == "x64":
+			score -= 10
+		default:
+			score -= 15
 		}
-		return 0
+		return score, false
+	case PlatformGeneric:
+		// 无法识别平台的通用包：保留可用性，但分数远低于明确的 Windows 包
+		return platformScore(name, PlatformGeneric), false
 	default:
-		switch {
-		case strings.Contains(n, "x86_64"), strings.Contains(n, "amd64"),
-			strings.Contains(n, "x64"), strings.Contains(n, "64bit"), strings.Contains(n, "64-bit"):
-			return scoreArchMatch
-		case strings.Contains(n, "arm64"), strings.Contains(n, "aarch64"):
-			return -15
-		case strings.Contains(n, "i686"), strings.Contains(n, "i386"),
-			strings.Contains(n, "x86"), strings.Contains(n, "386"):
-			return -10
-		}
-		return 0
+		return 0, true
 	}
 }
 
@@ -133,7 +75,7 @@ func MatchWindowsAsset(assets []Asset, goarch string) (*Asset, bool) {
 	if bestIdx < 0 {
 		return nil, false
 	}
-	if bestScore >= scoreWindows {
+	if bestScore >= 60 {
 		return &assets[bestIdx], true
 	}
 	if usable == 1 {

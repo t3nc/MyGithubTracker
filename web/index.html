@@ -100,6 +100,26 @@
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg></span>
         仅看未读
       </label>
+      <div class="platform-wrap" id="platformWrap">
+        <button class="btn platform-trigger" id="btnPlatforms" type="button" aria-haspopup="true" aria-expanded="false" title="选择要下载的平台（可多选）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/></svg>
+          <span>平台</span>
+          <span class="badge" id="platformCount" hidden>0</span>
+          <svg class="platform-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="platform-menu" id="platformMenu" hidden>
+          <div class="platform-menu-head">
+            <span>下载平台</span>
+            <div class="platform-quick">
+              <button type="button" data-platform-quick="local">仅本机</button>
+              <button type="button" data-platform-quick="all">全选</button>
+              <button type="button" data-platform-quick="none">清空</button>
+            </div>
+          </div>
+          <div class="platform-groups" id="platformGroups"></div>
+          <p class="platform-hint">勾选后只显示有对应安装包的仓库；仅 README、无附件和仅通用文件的项目也会隐藏。清空则关闭平台过滤。</p>
+        </div>
+      </div>
       <div class="select-wrap" title="按最近更新时间筛选">
         <select id="rangeSel">
           <option value="0">全部时间</option>
@@ -306,7 +326,7 @@
     <div class="modal-head">
       <div>
         <h2>选择要下载的文件</h2>
-        <p id="modalSub">未能自动识别 Windows 安装包，请手动选择</p>
+        <p id="modalSub">请选择要下载的文件</p>
       </div>
       <button class="btn btn-icon btn-sm" id="btnModalClose">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>

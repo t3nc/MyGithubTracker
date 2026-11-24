@@ -38,8 +38,88 @@
     trPending: Object.create(null),
     mdExpanded: Object.create(null),
     choice: null,
-    autoRead: Object.create(null)
+    autoRead: Object.create(null),
+    platforms: null,
+    platformHidden: 0
   };
+
+  /* ---------------- 平台定义（ID 与 Go 端 internal/github/platforms.go 保持一致） ---------------- */
+
+  var PLATFORM_KEY = 'mgt-platforms';
+
+  var PLATFORMS = [
+    { id: 'windows-x64', label: 'Windows x64', short: 'Win x64', group: 'Windows' },
+    { id: 'windows-x86', label: 'Windows x86', short: 'Win x86', group: 'Windows' },
+    { id: 'windows-arm64', label: 'Windows ARM64', short: 'Win ARM64', group: 'Windows' },
+    { id: 'macos-x64', label: 'macOS Intel', short: 'macOS Intel', group: 'macOS' },
+    { id: 'macos-arm64', label: 'macOS ARM64', short: 'macOS ARM', group: 'macOS' },
+    { id: 'macos-generic', label: 'macOS 通用', short: 'macOS', group: 'macOS' },
+    { id: 'linux-x64', label: 'Linux x64', short: 'Linux x64', group: 'Linux' },
+    { id: 'linux-x86', label: 'Linux x86', short: 'Linux x86', group: 'Linux' },
+    { id: 'linux-arm64', label: 'Linux ARM64', short: 'Linux ARM', group: 'Linux' },
+    { id: 'linux-armv7', label: 'Linux ARMv7', short: 'Linux ARMv7', group: 'Linux' },
+    { id: 'linux-generic', label: 'Linux 通用', short: 'Linux', group: 'Linux' },
+    { id: 'android-arm64', label: 'Android ARM64', short: 'Android ARM', group: 'Android' },
+    { id: 'android-armv7', label: 'Android ARMv7', short: 'Android ARMv7', group: 'Android' },
+    { id: 'android-x86', label: 'Android x86', short: 'Android x86', group: 'Android' },
+    { id: 'android-x64', label: 'Android x64', short: 'Android x64', group: 'Android' },
+    { id: 'android-generic', label: 'Android 通用', short: 'Android', group: 'Android' },
+    { id: 'generic', label: '通用/其他', short: '通用', group: '通用' }
+  ];
+
+  var PLATFORM_GROUPS = ['Windows', 'macOS', 'Linux', 'Android', '通用'];
+  var PLATFORM_MAP = Object.create(null);
+  for (var pInit = 0; pInit < PLATFORMS.length; pInit++) PLATFORM_MAP[PLATFORMS[pInit].id] = PLATFORMS[pInit];
+
+  function platformDef(id) { return PLATFORM_MAP[id] || null; }
+  function platformLabel(id) { var d = platformDef(id); return d ? d.label : id; }
+  function platformShort(id) { var d = platformDef(id); return d ? d.short : id; }
+
+  function sanitizePlatforms(list) {
+    var seen = Object.create(null);
+    if (list && typeof list.length === 'number') {
+      for (var i = 0; i < list.length; i++) {
+        var id = String(list[i] || '');
+        if (PLATFORM_MAP[id]) seen[id] = true;
+      }
+    }
+    var out = [];
+    for (var j = 0; j < PLATFORMS.length; j++) {
+      if (seen[PLATFORMS[j].id]) out.push(PLATFORMS[j].id);
+    }
+    return out;
+  }
+
+  function loadPlatformSelection() {
+    try {
+      var raw = localStorage.getItem(PLATFORM_KEY);
+      if (raw !== null && raw !== '') {
+        var parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.length === 'number') {
+          S.platforms = sanitizePlatforms(parsed);
+          return;
+        }
+      }
+    } catch (e) { /* 隐私模式或数据损坏时回退默认值 */ }
+    S.platforms = null;
+  }
+
+  function savePlatformSelection() {
+    try { localStorage.setItem(PLATFORM_KEY, JSON.stringify(S.platforms || [])); } catch (e) { /* 忽略 */ }
+  }
+
+  function ensurePlatformSelection() {
+    if (S.platforms !== null) return;
+    var hint = (S.state && S.state.platformHint) || '';
+    if (!PLATFORM_MAP[hint]) hint = 'windows-x64';
+    S.platforms = [hint];
+    savePlatformSelection();
+  }
+
+  function localPlatform() {
+    var hint = (S.state && S.state.platformHint) || 'windows-x64';
+    return PLATFORM_MAP[hint] ? hint : 'windows-x64';
+  }
 
   // 判断文本是否「以非中文为主」（用于决定是否显示翻译按钮）
   function isMostlyNonChinese(s) {
@@ -216,6 +296,7 @@
       S.refreshing = data.refreshing;
       S.progress = data.progress || S.progress;
       if (!S.refreshing) S.progress.phase = 'idle';
+      ensurePlatformSelection();
       renderAll();
     }).catch(function (err) {
       setStatus('err', '无法读取状态：' + err.message);
@@ -338,6 +419,7 @@
     } else if (st) {
       var txt = '共 ' + st.counts.all + ' 个仓库，' + st.counts.update + ' 个有新版本';
       if (st.hiddenCount > 0) txt += ' · 已隐藏 ' + st.hiddenCount + ' 个自己的仓库';
+      if (S.platformHidden > 0) txt += ' · 平台过滤隐藏 ' + S.platformHidden + ' 个仓库';
       setStatus('ok', txt);
     } else {
       setStatus('ok', '准备就绪');
@@ -354,11 +436,86 @@
     }
   }
 
+  /* ---------------- 渲染：平台过滤 ---------------- */
+
+  function renderPlatformFilter() {
+    var sel = S.platforms || [];
+    var badge = $('platformCount');
+    if (badge) {
+      badge.hidden = sel.length === 0;
+      badge.textContent = String(sel.length);
+    }
+    var trigger = $('btnPlatforms');
+    if (trigger) {
+      trigger.classList.toggle('is-off', sel.length === 0);
+      trigger.title = sel.length
+        ? ('下载平台：' + sel.map(platformLabel).join(' / '))
+        : '未选择平台（不过滤），点击选择';
+    }
+    var groups = $('platformGroups');
+    if (!groups) return;
+    var buf = [];
+    for (var g = 0; g < PLATFORM_GROUPS.length; g++) {
+      var group = PLATFORM_GROUPS[g];
+      var items = [];
+      for (var i = 0; i < PLATFORMS.length; i++) {
+        if (PLATFORMS[i].group === group) items.push(PLATFORMS[i]);
+      }
+      if (!items.length) continue;
+      buf.push('<div class="platform-group"><div class="platform-group-title">' + esc(group) + '</div><div class="platform-options">');
+      for (var j = 0; j < items.length; j++) {
+        var p = items[j];
+        var checked = sel.indexOf(p.id) >= 0 ? ' checked' : '';
+        buf.push('<label class="check"><input type="checkbox" data-platform="' + esc(p.id) + '"' + checked + '>' +
+          '<span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg></span>' +
+          esc(p.label) + '</label>');
+      }
+      buf.push('</div></div>');
+    }
+    groups.innerHTML = buf.join('');
+  }
+
+  function openPlatformMenu(on) {
+    var menu = $('platformMenu');
+    var btn = $('btnPlatforms');
+    if (!menu || !btn) return;
+    var next = on === undefined ? menu.hidden : !!on;
+    menu.hidden = !next;
+    btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+    var wrap = $('platformWrap');
+    if (wrap) wrap.classList.toggle('open', next);
+  }
+
+  function applyPlatforms(next) {
+    S.platforms = sanitizePlatforms(next);
+    savePlatformSelection();
+    renderPlatformFilter();
+    renderList();
+    renderStatus();
+  }
+
   /* ---------------- 渲染：列表 ---------------- */
 
   function visibleRepos() {
     if (!S.state) return [];
     var list = S.state.repos.slice();
+
+    // 平台过滤先于其它筛选执行：隐藏数量只取决于平台选择，状态栏口径保持稳定。
+    // 没有所选平台产物的仓库一律隐藏，包含仅 README、无附件、无可追踪与仅通用文件；
+    // 勾选「通用/其他」时，generic 下载项会命中并恢复显示。
+    S.platformHidden = 0;
+    if (S.platforms && S.platforms.length) {
+      var selected = S.platforms;
+      list = list.filter(function (r) {
+        var dl = r.downloads || [];
+        for (var i = 0; i < dl.length; i++) {
+          if (selected.indexOf(dl[i].platform) >= 0) return true;
+        }
+        S.platformHidden++;
+        return false;
+      });
+    }
+
     var q = S.query.trim().toLowerCase();
 
     if (S.filter === 'update') list = list.filter(function (r) { return r.hasUpdate; });
@@ -399,6 +556,21 @@
     alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 8v5"/><path d="M12 16.5h.01"/><circle cx="12" cy="12" r="8.6"/></svg>',
     empty: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 7V5a1 1 0 0 1 1-1h5l2 3"/></svg>'
   };
+
+  // 按注册表顺序返回当前选中平台对应的下载项
+  function repoPlatformDownloads(r) {
+    if (!S.platforms || !S.platforms.length) return [];
+    var all = r.downloads || [];
+    var out = [];
+    for (var i = 0; i < PLATFORMS.length; i++) {
+      var id = PLATFORMS[i].id;
+      if (S.platforms.indexOf(id) < 0) continue;
+      for (var j = 0; j < all.length; j++) {
+        if (all[j].platform === id) { out.push(all[j]); break; }
+      }
+    }
+    return out;
+  }
 
   function repoRow(r, index) {
     var mode = repoMode(r);
@@ -443,8 +615,14 @@
     if (r.releaseUrl) {
       actions += '<button class="btn" data-act="release" title="打开 Release 页面">' + ICON.external + '</button>';
     }
-    if (r.assets && r.assets.length) {
-      actions += '<button class="btn" data-act="download" title="下载（自动匹配 Windows 版本）">' + ICON.download + '</button>';
+    var platDls = repoPlatformDownloads(r);
+    if (platDls.length) {
+      for (var pd = 0; pd < platDls.length; pd++) {
+        var item = platDls[pd];
+        actions += '<button class="btn dl-platform" data-act="dl-platform" data-platform="' + esc(item.platform) + '" data-asset="' + esc(item.name) + '" title="下载 ' + esc(item.name) + (item.sizeText ? ' · ' + esc(item.sizeText) : '') + '">' + esc(platformShort(item.platform)) + '</button>';
+      }
+    } else if (r.assets && r.assets.length) {
+      actions += '<button class="btn" data-act="download" title="下载（自动匹配本机版本）">' + ICON.download + '</button>';
     }
     if (r.hasUpdate) {
       actions += '<button class="btn" data-act="read" title="标记为已读">' + ICON.check + '</button>';
@@ -478,12 +656,19 @@
     var repos = visibleRepos();
     if (!repos.length) {
       var hasAny = S.state.repos.length > 0;
+      var hiddenByPlatform = S.platformHidden || 0;
+      var title = '还没有同步星标仓库';
+      var hint = '点击右上角「刷新」拉取你的星标仓库：有 Release 的追踪最新版本，没有 Release 的自动改为追踪 README.md 的提交。首次同步只建立基线，不会把历史版本标记为新版本。';
+      if (hasAny) {
+        title = hiddenByPlatform > 0 ? '所选平台没有匹配的仓库' : '没有符合筛选条件的仓库';
+        hint = hiddenByPlatform > 0
+          ? '平台过滤隐藏了 ' + hiddenByPlatform + ' 个仓库。可以调整「平台」选择，或点「清空」关闭平台过滤。'
+          : '换一个筛选条件、放宽时间范围，或清空搜索关键词再试。';
+      }
       var html = '<div class="empty">' +
         '<div class="empty-icon">' + ICON.empty + '</div>' +
-        '<h3>' + (hasAny ? '没有符合筛选条件的仓库' : '还没有同步星标仓库') + '</h3>' +
-        '<p>' + (hasAny
-          ? '换一个筛选条件、放宽时间范围，或清空搜索关键词再试。'
-          : '点击右上角「刷新」拉取你的星标仓库：有 Release 的追踪最新版本，没有 Release 的自动改为追踪 README.md 的提交。首次同步只建立基线，不会把历史版本标记为新版本。') + '</p>' +
+        '<h3>' + esc(title) + '</h3>' +
+        '<p>' + esc(hint) + '</p>' +
         (hasAny ? '' : '<button class="btn btn-primary" data-act="refresh-all">开始第一次刷新</button>') +
         '</div>';
       list.innerHTML = html;
@@ -800,7 +985,20 @@
     }
 
     var buttons = '';
-    if (autoUrl) {
+    var selectedPlatforms = S.platforms || [];
+    if (selectedPlatforms.length) {
+      var perPlatform = rel.downloads || [];
+      for (var pk = 0; pk < PLATFORMS.length; pk++) {
+        var pid = PLATFORMS[pk].id;
+        if (selectedPlatforms.indexOf(pid) < 0) continue;
+        var pick = null;
+        for (var dk = 0; dk < perPlatform.length; dk++) {
+          if (perPlatform[dk].platform === pid) { pick = perPlatform[dk]; break; }
+        }
+        if (!pick) continue;
+        buttons += '<button class="btn btn-primary" data-durl="' + esc(pick.url) + '" data-dname="' + esc(pick.name) + '" title="' + esc(pick.name) + '">下载 ' + esc(platformLabel(pid)) + '</button>';
+      }
+    } else if (autoUrl) {
       buttons += '<button class="btn btn-primary" data-durl="' + esc(autoUrl) + '" data-dname="' + esc(autoName) + '">下载 Windows 版</button>';
     }
     if (assets.length) {
@@ -815,8 +1013,10 @@
       var rows = [];
       for (var j = 0; j < assets.length; j++) {
         var a = assets[j];
+        var platChip = a.platform ? '<span class="chip plat">' + esc(platformShort(a.platform)) + '</span>' : '';
         rows.push('<button class="btn btn-ghost" data-durl="' + esc(a.url) + '" data-dname="' + esc(a.name) + '">' +
           '<span class="fname">' + esc(a.name) + '</span>' +
+          platChip +
           '<span style="color:var(--fg-dim)">' + esc(a.sizeText || fmtSize(a.size)) + '</span></button>');
       }
       assetList = '<div class="rel-assets" id="assets-' + idx + '" hidden>' + rows.join('') + '</div>';
@@ -1465,6 +1665,7 @@
   }
 
   function renderAll() {
+    renderPlatformFilter();
     renderHeader();
     renderList();
     renderStatus();
@@ -1613,6 +1814,35 @@
     renderList();
   });
 
+  /* 平台多选 */
+  $('btnPlatforms').addEventListener('click', function (e) {
+    e.stopPropagation();
+    openPlatformMenu();
+  });
+  $('platformMenu').addEventListener('click', function (e) {
+    e.stopPropagation();
+    var quick = e.target.closest('[data-platform-quick]');
+    if (!quick) return;
+    var kind = quick.getAttribute('data-platform-quick');
+    if (kind === 'all') applyPlatforms(PLATFORMS.map(function (p) { return p.id; }));
+    else if (kind === 'none') applyPlatforms([]);
+    else applyPlatforms([localPlatform()]);
+  });
+  $('platformMenu').addEventListener('change', function (e) {
+    var input = e.target.closest('input[data-platform]');
+    if (!input) return;
+    var id = input.getAttribute('data-platform');
+    var next = (S.platforms || []).slice();
+    var idx = next.indexOf(id);
+    if (input.checked && idx < 0) next.push(id);
+    else if (!input.checked && idx >= 0) next.splice(idx, 1);
+    applyPlatforms(next);
+  });
+  document.addEventListener('click', function (e) {
+    var menu = $('platformMenu');
+    if (menu && !menu.hidden && !e.target.closest('#platformWrap')) openPlatformMenu(false);
+  });
+
   /* 主题切换 */
   $('btnTheme').addEventListener('click', toggleTheme);
   $('themeBar').addEventListener('click', function (e) {
@@ -1741,6 +1971,7 @@
     if (act === 'repo') openDetail(repo.fullName, 'readme');
     else if (act === 'release') openExternal(repo.releaseUrl);
     else if (act === 'download') startDownload(repo.fullName);
+    else if (act === 'dl-platform') downloadAsset(repo.fullName, btn.getAttribute('data-asset'));
     else if (act === 'read') markRead(repo.fullName);
   });
 
@@ -2030,6 +2261,7 @@
     var typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     if (e.key === '/' && !typing) { e.preventDefault(); $('search').focus(); return; }
     if (e.key === 'Escape') {
+      if (!$('platformMenu').hidden) { openPlatformMenu(false); return; }
       if (S.detailOpen) { closeDetail(); return; }
       if ($('modal').classList.contains('open')) { closeModal(); return; }
       if (S.drawerOpen) { openDrawer(false); return; }
@@ -2125,6 +2357,8 @@
       return;
     }
     syncThemeUI();
+    loadPlatformSelection();
+    renderPlatformFilter();
     loadConfig().then(ensureLogin);
     loadState().then(openFromHash);
     loadDownloads();

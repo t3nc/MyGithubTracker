@@ -110,7 +110,7 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.key)
-	req.Header.Set("User-Agent", "MyGithubTracker/1.0")
+	req.Header.Set("User-Agent", "MyGithubTracker/1.2")
 
 	resp, err := c.hc.Do(req)
 	if err != nil {
@@ -323,7 +323,7 @@ func (c *Client) translateOne(ctx context.Context, src string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.key)
-	req.Header.Set("User-Agent", "MyGithubTracker/1.0")
+	req.Header.Set("User-Agent", "MyGithubTracker/1.2")
 
 	resp, err := c.hc.Do(req)
 	if err != nil {

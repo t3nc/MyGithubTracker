@@ -19,7 +19,7 @@ import (
 const (
 	// DefaultBaseURL 是 GitHub API 根地址。
 	DefaultBaseURL = "https://api.github.com"
-	userAgent      = "MyGithubTracker/1.0"
+	userAgent      = "MyGithubTracker/1.2"
 )
 
 // ErrNotFound 表示资源不存在（例如仓库没有发布过 Release）。

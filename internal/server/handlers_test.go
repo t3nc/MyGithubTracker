@@ -2,9 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -213,6 +215,129 @@ func TestStateFiltersOwnedRepos(t *testing.T) {
 	counts := body["counts"].(map[string]any)
 	if counts["all"].(float64) != 1 {
 		t.Fatalf("counts.all 应基于过滤后集合，实际 %v", counts["all"])
+	}
+}
+
+func seedAssets(t *testing.T, srv *Server) {
+	t.Helper()
+	srv.opt.Store.SyncStarred([]store.RepoMeta{{FullName: "acme/tool", Description: "工具", Stars: 5}})
+	if !srv.opt.Store.Mutate("acme/tool", func(r *store.RepoState) {
+		r.Assets = []store.Asset{
+			{Name: "tool-1.0-win-x64.zip", Size: 20, URL: "https://github.com/acme/tool/releases/download/v1/tool-win.zip"},
+			{Name: "tool-1.0-win-x64.exe", Size: 10, URL: "https://github.com/acme/tool/releases/download/v1/tool-win.exe"},
+			{Name: "tool-1.0-macos-arm64.dmg", Size: 30, URL: "https://github.com/acme/tool/releases/download/v1/tool-mac.dmg"},
+			{Name: "tool-1.0-linux-amd64.tar.gz", Size: 40, URL: "https://github.com/acme/tool/releases/download/v1/tool-linux.tar.gz"},
+			{Name: "checksums.txt", Size: 1, URL: "https://github.com/acme/tool/releases/download/v1/checksums.txt"},
+		}
+	}) {
+		t.Fatal("写入测试附件失败")
+	}
+}
+
+func TestStateReturnsPlatformDownloads(t *testing.T) {
+	srv, ts, session := newTestServer(t)
+	seedAssets(t, srv)
+
+	code, body := doGetJSON(t, ts, session, "/api/state")
+	if code != http.StatusOK {
+		t.Fatalf("状态码 %d", code)
+	}
+	if body["os"] != runtime.GOOS {
+		t.Fatalf("os 字段错误: %v", body["os"])
+	}
+	if hint, _ := body["platformHint"].(string); hint == "" {
+		t.Fatal("应返回本机平台提示 platformHint")
+	}
+
+	repos := body["repos"].([]any)
+	repo := repos[0].(map[string]any)
+	downloads, ok := repo["downloads"].([]any)
+	if !ok || len(downloads) != 3 {
+		t.Fatalf("应返回 3 个平台下载项（windows/macos/linux），实际 %v", repo["downloads"])
+	}
+	first := downloads[0].(map[string]any)
+	if first["platform"] != "windows-x64" {
+		t.Fatalf("平台顺序错误: %v", downloads)
+	}
+	if first["name"] != "tool-1.0-win-x64.exe" {
+		t.Fatalf("Windows 应优先 exe，实际 %v", first["name"])
+	}
+}
+
+func TestStateSkipsPlatformDownloadsForReadmeRepos(t *testing.T) {
+	srv, ts, session := newTestServer(t)
+	srv.opt.Store.SyncStarred([]store.RepoMeta{{FullName: "acme/readme-only"}})
+	srv.opt.Store.Mutate("acme/readme-only", func(r *store.RepoState) {
+		r.TrackMode = store.TrackReadme
+		r.ReadmeSHA = "abc"
+	})
+
+	_, body := doGetJSON(t, ts, session, "/api/state")
+	repo := body["repos"].([]any)[0].(map[string]any)
+	if got, ok := repo["downloads"].([]any); !ok || len(got) != 0 {
+		t.Fatalf("README 仓库不应有平台下载项，实际 %v", repo["downloads"])
+	}
+}
+
+func TestDownloadRejectsUnknownPlatform(t *testing.T) {
+	srv, ts, session := newTestServer(t)
+	seedAssets(t, srv)
+
+	code, body := doJSON(t, ts, session, "/api/download", `{"repo":"acme/tool","platform":"plan9-x64"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("未知平台应返回 400，实际 %d (%v)", code, body)
+	}
+}
+
+func TestDownloadReportsMissingPlatformAsset(t *testing.T) {
+	srv, ts, session := newTestServer(t)
+	seedAssets(t, srv)
+
+	code, body := doJSON(t, ts, session, "/api/download", `{"repo":"acme/tool","platform":"android-arm64"}`)
+	if code != http.StatusOK {
+		t.Fatalf("状态码 %d", code)
+	}
+	if body["reason"] != "no-platform" {
+		t.Fatalf("应提示所选平台无文件，实际 %v", body)
+	}
+}
+
+func fetchStatic(t *testing.T, url string) string {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("请求静态资源失败: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("读取静态资源失败: %v", err)
+	}
+	return string(body)
+}
+
+func TestStaticAssetsIncludePlatformFilter(t *testing.T) {
+	_, ts, _ := newTestServer(t)
+
+	index := fetchStatic(t, ts.URL+"/")
+	for _, want := range []string{"platformMenu", "platformGroups", "btnPlatforms", "platformCount", "data-platform-quick"} {
+		if !strings.Contains(index, want) {
+			t.Fatalf("index.html 缺少平台筛选标记 %q", want)
+		}
+	}
+
+	js := fetchStatic(t, ts.URL+"/app.js")
+	for _, want := range []string{"mgt-platforms", "platformHint", "dl-platform", "platformShort", "平台过滤隐藏"} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("app.js 缺少平台筛选实现 %q", want)
+		}
+	}
+
+	css := fetchStatic(t, ts.URL+"/style.css")
+	for _, want := range []string{".platform-menu", ".platform-options", ".dl-platform"} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("style.css 缺少平台筛选样式 %q", want)
+		}
 	}
 }
 
